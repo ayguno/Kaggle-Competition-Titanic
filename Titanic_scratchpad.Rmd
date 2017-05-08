@@ -32,7 +32,38 @@ table(training$Embarked)
 Exploration by pairs plot:
 
 ```{r}
-pairs(Survived ~ Pclass+ Age+ SibSp+Parch+Fare,pch =19, cex = 0.4,data=training,
+pairs(Survived ~ Age+ SibSp+Parch+Fare,pch =19, cex = 0.4,data=training,
       col= ifelse(training$Survived == 1, "navy","red"))
+
+# Clearly less people survived from the 3rd class
+table(training$Survived,training$Pclass)
+
+table(training$Survived, training$Embarked)
+
+# Clearly more Females survived
+table(training$Survived,training$Sex)
+
+
+
+# Consistent with the Class ~ Survival relationship
+boxplot(log(Fare) ~ Survived, data = training)
+boxplot(SibSp ~ Survived, data = training)
+boxplot(Parch ~ Survived, data = training)
+```
+
+Feature Engineering:
+
+Better to perform this step at the very end for all categorical variables.
+
+Remove the passenger ID column from the training set.
+
+STEP1: Generate Dummy Variables for Sex, Pclass
+```{r}
+library(caret)
+dummies <- dummyVars(Survived ~ Sex + factor(Pclass), data = training)
+
+# Add the dummy variables to both training and test data set:
+training <- cbind(training, predict(dummies,newdata = training))
+testing <- cbind(testing, predict(dummies,newdata = testing))
 ```
 
