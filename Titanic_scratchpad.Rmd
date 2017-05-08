@@ -1,0 +1,19 @@
+---
+title: "This is just the scratchpad for the analysis not the final report"
+author: "Ozan Aygun"
+date: "5/7/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, results = "markup")
+setwd("~/Desktop/2016/Data_science/Kaggle/Kaggle-Competition-Titanic")
+```
+
+Load the data sets:
+
+```{r}
+training <- read.csv("train.csv", stringsAsFactors = FALSE)
+testing <- read.csv("test.csv", stringsAsFactors = FALSE)
+```
+
