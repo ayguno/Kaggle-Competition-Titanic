@@ -6,14 +6,33 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, results = "markup")
+knitr::opts_chunk$set(echo = TRUE, results = "markup", fig.align = "center",
+                      fig.width = 5, fig.height = 5)
 setwd("~/Desktop/2016/Data_science/Kaggle/Kaggle-Competition-Titanic")
 ```
 
 Load the data sets:
 
 ```{r}
-training <- read.csv("train.csv", stringsAsFactors = FALSE)
-testing <- read.csv("test.csv", stringsAsFactors = FALSE)
+training <- read.csv("train.csv", stringsAsFactors = FALSE, na.strings = "")
+testing <- read.csv("test.csv", stringsAsFactors = FALSE,na.strings = "")
+```
+
+Summarize the training data set:
+```{r}
+summary(training)
+table(training$Sex)
+table(training$Cabin)
+table(training$Embarked)
+```
+
+
+# General preprocessing and EDA (all processing performed in the building set and exactly applied to tune.testing,validation, and final_testing sets)
+
+Exploration by pairs plot:
+
+```{r}
+pairs(Survived ~ Pclass+ Age+ SibSp+Parch+Fare,pch =19, cex = 0.4,data=training,
+      col= ifelse(training$Survived == 1, "navy","red"))
 ```
 
