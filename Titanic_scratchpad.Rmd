@@ -18,6 +18,23 @@ training <- read.csv("train.csv", stringsAsFactors = FALSE, na.strings = "")
 testing <- read.csv("test.csv", stringsAsFactors = FALSE,na.strings = "")
 ```
 
+Partition the training set into:
+
+- training: train different models
+- tune.test.set: initial out of the box performance
+
+```{r,results='markup'}
+library(caret)
+set.seed(1234)
+InTrain <- createDataPartition(y=training$Survived,p = 0.7,list = FALSE)
+
+tune.test.set <- training[-InTrain,]
+training <- training[InTrain,]
+
+```
+
+
+
 Summarize the training data set:
 ```{r}
 summary(training)
@@ -27,11 +44,66 @@ table(training$Embarked)
 ```
 
 
-# General preprocessing and EDA (all processing performed in the building set and exactly applied to tune.testing,validation, and final_testing sets)
+# Basic preprocessing and EDA (all processing performed in the building set and exactly applied to tune.testing,validation, and final_testing sets)
 
-Exploration by pairs plot:
+## Generate factor (categorical variables)
+```{r}
+training <- transform(training,Survived = factor(Survived), Pclass = factor(Pclass),
+          Sex = factor(Sex),SibSp = factor(SibSp), Parch = factor(Parch))
+tune.test.set <- transform(tune.test.set,Survived = factor(Survived), Pclass = factor(Pclass),Sex = factor(Sex),SibSp = factor(SibSp), Parch = factor(Parch))
+
+testing <- transform(testing, Pclass = factor(Pclass),
+          Sex = factor(Sex),SibSp = factor(SibSp), Parch = factor(Parch))
+
+```
+
+## Remove the passenger ID column from the training sets.
 
 ```{r}
+library(dplyr)
+training <- dplyr::select(training,-PassengerId)
+tune.test.set <- dplyr::select(tune.test.set,-PassengerId)
+```
+
+# Investigate the missing values
+
+```{r}
+training.na <- as.data.frame(is.na(training));names(training.na) <- names(training)
+apply(training.na,2,sum)
+```
+
+Missing values appear in 3 variables; Age, Cabin and Embarked.
+
+### Cabin feature: more than 75% is missing
+
+From the available observations, we can infer that the first letter actually presents the cabin section.
+
+Extract the first letter from the available ones and test if they have any predictive value:
+
+```{r}
+library(ggplot2); library(dplyr)
+Cabin.letter <-substr(training$Cabin[!training.na$Cabin],1,1)
+Cabin.survival <- training$Survived[!training.na$Cabin]
+Cabin.Pclass <- training$Pclass[!training.na$Cabin]
+qplot(x = factor(Cabin.letter), fill = Cabin.survival)+scale_fill_manual(values = c("red","navy"))+theme_bw()
+```
+We notice that this feature has some predictive value. 
+
+We check if the cabin relates with the Pclass:
+```{r}
+qplot(x = factor(Cabin.letter), fill = Cabin.Pclass)+scale_fill_manual(values = c("red","navy","green"))+theme_bw()
+```
+We indeed notice that Cabin letters A,B,C are absolutely first class and therefore can be imputed from the Pclass variable. D and E are also more likely to be in 1st class. Gs are all coming from the 3rd Class. 
+
+The problem with imputing Cabin feature with Pclass is that we don't know whether the missing variables are MCAR (Missing Completely at Random) or whether there is a relationship between the reason they are missing and the outcome (Survival).
+
+Therefore, it would be more sensible to drop this variable and don't use in building our classifiers.
+
+
+
+
+```{r}
+#Exploration by pairs plot:
 pairs(Survived ~ Age+ SibSp+Parch+Fare,pch =19, cex = 0.4,data=training,
       col= ifelse(training$Survived == 1, "navy","red"))
 
@@ -47,17 +119,30 @@ table(training$Survived,training$Sex)
 
 # Consistent with the Class ~ Survival relationship
 boxplot(log(Fare) ~ Survived, data = training)
+
+
+library(ggplot2)
+ggplot(aes(x = SibSp, fill = factor(Survived)), data = training)+
+        geom_bar(stat = "count")+
+        theme_bw()
+
+ggplot(aes(x = Parch, fill = factor(Survived)), data = training)+
+        geom_bar(stat = "count")+
+        theme_bw()
+
 boxplot(SibSp ~ Survived, data = training)
 boxplot(Parch ~ Survived, data = training)
 ```
 
-Feature Engineering:
+#Feature Engineering:
 
+
+
+
+
+
+STEP: Generate Dummy Variables for Sex, Pclass
 Better to perform this step at the very end for all categorical variables.
-
-Remove the passenger ID column from the training set.
-
-STEP1: Generate Dummy Variables for Sex, Pclass
 ```{r}
 library(caret)
 dummies <- dummyVars(Survived ~ Sex + factor(Pclass), data = training)
