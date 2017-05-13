@@ -176,6 +176,7 @@ boxplot(Parch ~ Survived, data = training)
 
 STEP: Generate Dummy Variables for Sex, Pclass
 Better to perform this step at the very end for all categorical variables.
+
 ```{r}
 library(caret)
 dummies <- dummyVars(Survived ~ Sex + factor(Pclass), data = training)
