@@ -49,11 +49,11 @@ table(training$Embarked)
 ## Generate factor (categorical variables)
 ```{r}
 training <- transform(training,Survived = factor(Survived), Pclass = factor(Pclass),
-          Sex = factor(Sex),SibSp = factor(SibSp), Parch = factor(Parch))
-tune.test.set <- transform(tune.test.set,Survived = factor(Survived), Pclass = factor(Pclass),Sex = factor(Sex),SibSp = factor(SibSp), Parch = factor(Parch))
+          Sex = factor(Sex),SibSp = factor(SibSp), Parch = factor(Parch), Embarked = factor(Embarked))
+tune.test.set <- transform(tune.test.set,Survived = factor(Survived), Pclass = factor(Pclass),Sex = factor(Sex),SibSp = factor(SibSp), Parch = factor(Parch), Embarked = factor(Embarked))
 
 testing <- transform(testing, Pclass = factor(Pclass),
-          Sex = factor(Sex),SibSp = factor(SibSp), Parch = factor(Parch))
+          Sex = factor(Sex),SibSp = factor(SibSp), Parch = factor(Parch), Embarked = factor(Embarked))
 
 ```
 
@@ -93,7 +93,7 @@ We check if the cabin relates with the Pclass:
 ```{r}
 qplot(x = factor(Cabin.letter), fill = Cabin.Pclass)+scale_fill_manual(values = c("red","navy","green"))+theme_bw()
 ```
-We indeed notice that Cabin letters A,B,C are absolutely first class and therefore can be imputed from the Pclass variable. D and E are also more likely to be in 1st class. Gs are all coming from the 3rd Class. 
+We indeed notice that Cabin letters A,B,C are absolutely first class and therefore can be inferred from the Pclass variable. D and E are also more likely to be in 1st class. Gs are all coming from the 3rd Class. 
 
 We can also check if fare relates with the cabin letter:
 ```{r}
@@ -102,7 +102,7 @@ qplot(x = factor(Cabin.letter), y=Cabin.Fare, color = Cabin.survival)+theme_bw()
 ```
 The relationship between Fare and Cabin Letter is not so dramatic to allow some imputation. 
 
-The problem with imputing Cabin feature with Pclass is that we don't know whether the missing variables are MCAR (Missing Completely at Random) or whether there is a relationship between the reason they are missing and the outcome (Survival).
+The problem with imputing Cabin feature from Pclass is that we don't know whether the missing variables are MCAR (Missing Completely at Random) or whether there is a relationship between the reason they are missing and the outcome (Survival).
 
 Therefore, it would be more sensible to drop this variable and don't use in building our classifiers.
 
@@ -123,7 +123,7 @@ qplot(x = SibSp, y = Age, color = Survived, data = training)+
        theme_bw()
   
 ```
-We notice that as the SibSp increases, the age group decreases.
+We notice that as the SibSp increases, the age group decreases. 
 ```{r}
 ggplot(data = training, aes(x = Age, fill= Survived))+
         geom_histogram(bins = 40)+facet_grid(. ~ SibSp)+ scale_fill_manual(values = c("red","navy"))+
@@ -131,7 +131,41 @@ ggplot(data = training, aes(x = Age, fill= Survived))+
 ```
 Most of the Age distribution is having either no Spouses or siblings or only 1.  For the 1 siblings/spouses group the mean age is higher. In both cases Age is appromated by normal distribution.
 
-It would be sensible to impute Age by random gaussian imputation using the mean and standard deviation of individual SibSp levels.
+It would be also interesting to include gender differences when considering Age:
+```{r}
+ggplot(data = training, aes(x = Age, fill= Survived))+
+        geom_histogram(bins = 40)+facet_grid(. ~ Sex)+ scale_fill_manual(values = c("red","navy"))+
+        theme_bw()
+```
+How about the Age distribution in different passenger classes? (Pclass):
+
+```{r}
+ggplot(data = training, aes(x = Age, fill= Survived))+
+        geom_histogram(bins = 40)+facet_grid(. ~ Pclass)+ scale_fill_manual(values = c("red","navy"))+
+        theme_bw()
+training %>% group_by(Pclass,Survived) %>% summarise(mean(Age,na.rm=T))
+```
+This is quite interesting! In all passenger classes, the mean age of the survived passengers is lower than those passed away. We also notice that the mean age decreases and the Class number increases, i.e: older passengers are in the better classes on average. Therefore, Pclass would also be include in the imputation model.
+
+It would be therefore sensible to impute Age by random gaussian imputation using the mean and standard deviation of individual SibSp levels. We will also include Sex in this model to account for gender-specific differences in Age as well as Pclass to account for the interesting seperation of Age by Passenger Class we noted above. In order to do this more rigorously, we can first fit a linear model with the existing Age , SibSp , Sex  and Pclass  data:
+
+##### Age ~ SibSp + Sex + Pclass + e (random gaussian error)
+
+```{r}
+lmAge = lm(Age ~ SibSp+ Sex + Pclass, data = training, na.action = "na.omit")
+summary(lmAge)
+par(mfrow = c(2,2))
+plot(lmAge)[1]
+plot(lmAge)[2]
+plot(lmAge)[3]
+plot(lmAge)[4]
+```
+This model is just OK, but we don't need the perfect model for this type of imputation. Nice to see that both variance and normality assumptions of the model holds and allmost all levels of the covariates have significant impact on the mean outcome in the presence of each other. This would give us a good estimation for the missing values of Age.
+
+Using the model to impute missing values of Age:
+
+
+
 
 
 
