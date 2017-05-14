@@ -77,6 +77,10 @@ ggplot(aes(x = Parch, fill = factor(Survived)), data = training)+
 
 boxplot(SibSp ~ Survived, data = training)
 boxplot(Parch ~ Survived, data = training)
+
+
+
+
 ```
 
 ## Generate factor (categorical variables)
@@ -225,29 +229,54 @@ tune.test.set <- tune.test.set[complete.cases(tune.test.set),]
 testing <- testing[complete.cases(testing),]
 ```
 
-
-
-
-
-
+Now we have completed processing the missing values.
 
 
 #Feature Engineering:
 
+## Generate Dummy Variables Factor variables
 
-
-
-
-
-STEP: Generate Dummy Variables for Sex, Pclass
 Better to perform this step at the very end for all categorical variables.
 
 ```{r}
 library(caret)
-dummies <- dummyVars(Survived ~ Sex + factor(Pclass), data = training)
 
-# Add the dummy variables to both training and test data set:
-training <- cbind(training, predict(dummies,newdata = training))
-testing <- cbind(testing, predict(dummies,newdata = testing))
+which(sapply(training[,-1],is.factor))
+# There are 5 categorical predictors in out data set
+
+factors.training <- which(sapply(training,is.factor))
+factors.tune.test.set <- which(sapply(tune.test.set,is.factor))
+factors.testing <- which(sapply(testing,is.factor))
+
+
+dummies.training <- dummyVars(Survived ~ Pclass + Sex + SibSp + Parch + Embarked, data = training)
+
+dummies.tune.test.set <- dummyVars(Survived ~ Pclass + Sex + SibSp + Parch + Embarked, data = tune.test.set)
+
+dummies.testing <- dummyVars(PassengerId ~ Pclass + Sex + SibSp + Parch + Embarked, data = testing)
+
+
+# Add the dummy variables to both training and test data sets, simultaneously removing the existing factor variables:
+training <- cbind(training[,-factors.training[-1]], predict(dummies.training,newdata = training))
+tune.test.set <- cbind(tune.test.set[,-factors.tune.test.set[-1]], predict(dummies.tune.test.set,newdata = tune.test.set))
+testing <- cbind(testing[,-factors.testing], predict(dummies.testing,newdata = testing))
 ```
 
+After doing that we notice that there are differences in the factor levels of certain variables are not present in the training set and test sets. These are present in Parch and SibSp features. The lower levels of these variables are conserved in all sets and they represent most of the data. At this stage we will only keep features that are present in all sets:
+
+```{r}
+training <- training[,names(training) %in% names(tune.test.set)]
+tune.test.set <- tune.test.set[,names(tune.test.set) %in% names(training)]
+
+identical(names(training),names(tune.test.set))
+
+PassengerId <- testing$PassengerId
+
+testing <- testing[,names(testing) %in% names(training)]
+testing$PassengerId <- PassengerId
+
+```
+
+
+
+This completes the pre-processing of the dummy variables in all data sets.
