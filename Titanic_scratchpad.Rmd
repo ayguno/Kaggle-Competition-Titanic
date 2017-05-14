@@ -279,5 +279,75 @@ testing$PassengerId <- PassengerId
 
 ### Feature engineering with Name and Ticket variables
 
+### Ticket feature:
+
+It would be interesting to just convert the ticket feature to numeric and see if it has any seperation value:
+```{r}
+
+Ticket <- toupper(training$Ticket)
+# Better to remove anything left of the last white space
+w <- grep(" ", Ticket)
+last.space<- sapply(gregexpr(" ",Ticket[w]), function(y){
+        max(y[1])
+})
+
+Ticket[w] <- substring(Ticket[w],last.space+1)
+
+Ticket <- gsub(" ","", Ticket)
+Ticket <- gsub("[A-Z]","",Ticket)
+Ticket <- gsub("\\.","",Ticket)
+Ticket <- gsub("\\/","", Ticket)
+Ticket <- as.numeric(Ticket)
+Ticket[is.na(Ticket)] = 0
+Ticket <- as.numeric(Ticket)
+
+
+qplot(x=Ticket, y = Fare, data = training, color = Survived)+theme_bw()
+
+```
+We note that at least two groups of ticket numbers are associated with higher fares, and to some extent they seperate the outcome classes. Therefore, we will engineer this numeric feature and add into all sets, we will remove the original variable.
+
+```{r}
+# Feature Engineering function
+
+num.Ticket <- function(x){
+Ticket <- toupper(x$Ticket)
+# Better to remove anything left of the last white space
+w <- grep(" ", Ticket)
+last.space<- sapply(gregexpr(" ",Ticket[w]), function(y){
+        max(y[1])
+})
+Ticket[w] <- substring(Ticket[w],last.space+1)
+
+Ticket <- gsub(" ","", Ticket)
+Ticket <- gsub("[A-Z]","",Ticket)
+Ticket <- gsub("\\.","",Ticket)
+Ticket <- gsub("\\/","", Ticket)
+Ticket <- as.numeric(Ticket)
+Ticket <- as.numeric(Ticket)
+return(Ticket)
+}
+
+training$num.Ticket <- num.Ticket(training)
+tune.test.set$num.Ticket <- num.Ticket(tune.test.set)
+testing$num.Ticket <- num.Ticket(testing)
+
+
+sum(is.na(training$num.Ticket ))
+sum(is.na(tune.test.set$num.Ticket ))
+sum(is.na(testing$num.Ticket))
+```
+After this conversion, only 2 missing values were introduced to training and tune.testing data sets.
+
+### Name feature:
+
+When looking into the names of the passengers, we notice that at least we can attempt to extract a "title" feature from the name strings and explore its relationship with the outcome:
+
+```{r}
+
+```
+
+
+
 
 This completes the pre-processing of the dummy variables in all data sets.
