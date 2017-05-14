@@ -46,6 +46,39 @@ table(training$Embarked)
 
 # Basic preprocessing and EDA (all processing performed in the building set and exactly applied to tune.testing,validation, and final_testing sets)
 
+
+```{r}
+#Exploration by pairs plot:
+pairs(Survived ~ Age+ SibSp+Parch+Fare,pch =19, cex = 0.4,data=training,
+      col= ifelse(training$Survived == 1, "navy","red"))
+
+# Clearly less people survived from the 3rd class
+table(training$Survived,training$Pclass)
+
+table(training$Survived, training$Embarked)
+
+# Clearly more Females survived
+table(training$Survived,training$Sex)
+
+
+
+# Consistent with the Class ~ Survival relationship
+boxplot(log(Fare) ~ Survived, data = training)
+
+
+library(ggplot2)
+ggplot(aes(x = SibSp, fill = factor(Survived)), data = training)+
+        geom_bar(stat = "count")+
+        theme_bw()
+
+ggplot(aes(x = Parch, fill = factor(Survived)), data = training)+
+        geom_bar(stat = "count")+
+        theme_bw()
+
+boxplot(SibSp ~ Survived, data = training)
+boxplot(Parch ~ Survived, data = training)
+```
+
 ## Generate factor (categorical variables)
 ```{r}
 training <- transform(training,Survived = factor(Survived), Pclass = factor(Pclass),
@@ -129,9 +162,9 @@ ggplot(data = training, aes(x = Age, fill= Survived))+
         geom_histogram(bins = 40)+facet_grid(. ~ SibSp)+ scale_fill_manual(values = c("red","navy"))+
         theme_bw()
 ```
-Most of the Age distribution is having either no Spouses or siblings or only 1.  For the 1 siblings/spouses group the mean age is higher. In both cases Age is appromated by normal distribution.
+Most of the Age distribution is having either no Spouses or siblings or only 1.  For the 1 siblings/spouses group the mean age is higher. In both cases Age is appromated by normal distribution. The problem with SibSp is that some of the factor levels are only present in the observations where Age is missing, making this predictor unbalanced across the missing and complete cases.
 
-It would be also interesting to include gender differences when considering Age:
+It would be also interesting to explore gender differences when considering Age:
 ```{r}
 ggplot(data = training, aes(x = Age, fill= Survived))+
         geom_histogram(bins = 40)+facet_grid(. ~ Sex)+ scale_fill_manual(values = c("red","navy"))+
@@ -147,12 +180,12 @@ training %>% group_by(Pclass,Survived) %>% summarise(mean(Age,na.rm=T))
 ```
 This is quite interesting! In all passenger classes, the mean age of the survived passengers is lower than those passed away. We also notice that the mean age decreases and the Class number increases, i.e: older passengers are in the better classes on average. Therefore, Pclass would also be include in the imputation model.
 
-It would be therefore sensible to impute Age by random gaussian imputation using the mean and standard deviation of individual SibSp levels. We will also include Sex in this model to account for gender-specific differences in Age as well as Pclass to account for the interesting seperation of Age by Passenger Class we noted above. In order to do this more rigorously, we can first fit a linear model with the existing Age , SibSp , Sex  and Pclass  data:
+It would be therefore sensible to impute Age by random gaussian imputation using the mean and standard deviation of individual factor levels of these predictors. We will include Sex in this model to account for gender-specific differences in Age, as well as Pclass to account for the interesting seperation of Age by Passenger Class we noted above. In order to do this more rigorously, we can first fit a linear model with the existing Age , Sex  and Pclass  data:
 
-##### Age ~ SibSp + Sex + Pclass + e (random gaussian error)
+##### Age ~  Sex + Pclass + e (random gaussian error)
 
 ```{r}
-lmAge = lm(Age ~ SibSp+ Sex + Pclass, data = training, na.action = "na.omit")
+lmAge = lm(Age ~ Sex + Pclass, data = training, na.action = "na.omit")
 summary(lmAge)
 par(mfrow = c(2,2))
 plot(lmAge)[1]
@@ -160,46 +193,44 @@ plot(lmAge)[2]
 plot(lmAge)[3]
 plot(lmAge)[4]
 ```
-This model is just OK, but we don't need the perfect model for this type of imputation. Nice to see that both variance and normality assumptions of the model holds and allmost all levels of the covariates have significant impact on the mean outcome in the presence of each other. This would give us a good estimation for the missing values of Age.
+This model is just OK, but we don't need the perfect model for this type of imputation. Nice to see that both variance and normality assumptions of the model holds and all levels of the covariates have significant impact on the mean outcome in the presence of each other. This would give us a good estimation for the missing values of Age.
 
 Using the model to impute missing values of Age:
 
+```{r}
+training$Age[is.na(training$Age)] = predict(lmAge, newdata = training[is.na(training$Age),])
+tune.test.set$Age[is.na(tune.test.set$Age)] = predict(lmAge, newdata = tune.test.set[is.na(tune.test.set$Age),])
+testing$Age[is.na(testing$Age)] = predict(lmAge, newdata = testing[is.na(testing$Age),])
 
+```
+Note that we use the same model object we derived from the training data set to impute the missing values of Age for all data sets. This will prevent us from overfitting to the test data set.
 
+Re-investigate the missing values:
+```{r}
+training.na <- as.data.frame(is.na(training));names(training.na) <- names(training)
+apply(training.na,2,sum)
 
+tune.testing.na <- as.data.frame(is.na(tune.test.set));names(tune.testing.na) <- names(tune.test.set)
+apply(tune.testing.na ,2,sum)
 
+testing.na <- as.data.frame(is.na(testing));names(testing.na) <- names(testing)
+apply(testing.na ,2,sum)
+
+```
+It appears that only one case is left missing in each of the data sets. We will consider this as random missingness and remove in each data set:
 
 ```{r}
-#Exploration by pairs plot:
-pairs(Survived ~ Age+ SibSp+Parch+Fare,pch =19, cex = 0.4,data=training,
-      col= ifelse(training$Survived == 1, "navy","red"))
-
-# Clearly less people survived from the 3rd class
-table(training$Survived,training$Pclass)
-
-table(training$Survived, training$Embarked)
-
-# Clearly more Females survived
-table(training$Survived,training$Sex)
-
-
-
-# Consistent with the Class ~ Survival relationship
-boxplot(log(Fare) ~ Survived, data = training)
-
-
-library(ggplot2)
-ggplot(aes(x = SibSp, fill = factor(Survived)), data = training)+
-        geom_bar(stat = "count")+
-        theme_bw()
-
-ggplot(aes(x = Parch, fill = factor(Survived)), data = training)+
-        geom_bar(stat = "count")+
-        theme_bw()
-
-boxplot(SibSp ~ Survived, data = training)
-boxplot(Parch ~ Survived, data = training)
+training <- training[complete.cases(training),]
+tune.test.set <- tune.test.set[complete.cases(tune.test.set),]
+testing <- testing[complete.cases(testing),]
 ```
+
+
+
+
+
+
+
 
 #Feature Engineering:
 
