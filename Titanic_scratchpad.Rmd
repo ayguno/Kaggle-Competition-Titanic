@@ -485,3 +485,15 @@ Since these are all binary variables, PCA did not furher help to reduce the dime
 We will use the remaining 20 features to train our classifiers.
 
 ## Training Classifiers
+
+Due to the classification nature of the problem, we will perform tree-based prediction algorithms and support vector machines to perform predictions.
+
+- Simple classification tree (method = "rpart") with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+RPART <- train(Survived ~ ., data = training,method = "rpart", trControl = trainControl(method = "cv", number = 10))
+saveRDS(RPART,"RPART.rds") #Save model object for future loading if necessary
+```
+
+
