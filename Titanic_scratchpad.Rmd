@@ -496,4 +496,69 @@ RPART <- train(Survived ~ ., data = training,method = "rpart", trControl = train
 saveRDS(RPART,"RPART.rds") #Save model object for future loading if necessary
 ```
 
+- Random Forest (method = "rf") with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+RF <- train(Survived ~ ., data = training,method = "rf", trControl = trainControl(method = "cv", number = 10)) 
+saveRDS(RF,"RF.rds") #Save model object for future loading if necessary
+
+```
+
+- Boosted tree (method = "gbm") with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+GBM <- train(Survived ~ ., data = training,method = "gbm", trControl = trainControl(method = "cv", number = 10), verbose = FALSE) 
+saveRDS(GBM,"GBM.rds") #Save model object for future loading if necessary
+```
+
+- support vector machines with a radial kernel
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+SVM <- train(Survived ~ ., data = training,method = "svmRadial", trControl = trainControl(method = "cv", number = 10))
+# Takes very long time to run!!
+saveRDS(SVM,"SVM.rds")
+```
+
+
+# Summarizing the initial results from the individual classifiers
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+# Using resamples function from the caret package to summarize the data
+
+modelsummary <- resamples(list(RPART=RPART,RF=RF,GBM=GBM,SVM=SVM))
+
+# In-sample accuracy values for each model
+summary(modelsummary)$statistics$Accuracy
+
+# If necessary we can also produce 'variable importance' plots to see which variables are making most contributions #to each model
+dotPlot(varImp(RPART))
+dotPlot(varImp(RF))
+dotPlot(varImp(SVM))
+dotPlot(varImp(GBM))
+```
+
+# Making predictions by using the classifiers and tune.test.set
+
+```{r,results= 'markup', message=FALSE,warning=FALSE, cache=TRUE}
+
+pred.tune.RPART <- predict(RPART,newdata = tune.test.set)
+pred.tune.RF <- predict(RF,newdata = tune.test.set)
+pred.tune.SVM <- predict(SVM,newdata = tune.test.set)
+pred.tune.GBM <- predict(GBM,newdata = tune.test.set)
+
+# Collect accuracy values in a data.frame:
+
+tune.testing.predictions <-data.frame(pred.tune.RPART,pred.tune.RF,pred.tune.SVM,pred.tune.GBM)
+
+tune.testing.accuracy <- apply(tune.testing.predictions, 2, function(x){
+        temp=confusionMatrix(x,tune.test.set$Survived)$overall[1]
+        names(temp) <- names(x)
+        return(temp)
+})
+tune.testing.accuracy
+```
+
+Based on the prediction in the tune.test.set, Random Forest classification tree gave the highest out of the box accuracy. The accuracy is ~ 83.3 %. 
 
