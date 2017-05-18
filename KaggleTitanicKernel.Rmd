@@ -1,0 +1,338 @@
+---
+title: "Feature engineering and building classifiers to predict survival in Titanic"
+author: "Ozan Aygun"
+date: "5/16/2017"
+output: 
+   html_document:
+        toc: true
+        number_sections: true
+        depth: 4
+        theme: cerulean
+        highlight: tango
+        df_print: paged
+---
+# Introduction
+
+
+___
+
+# Loading and partitioning the data
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(results = "markup", fig.align = "center",
+                      fig.width = 5, fig.height = 4,message=FALSE,warning=FALSE)
+```
+
+```{r,echo=FALSE}
+setwd("~/Desktop/2016/Data_science/Kaggle/Kaggle-Competition-Titanic")
+```
+
+Load the data sets:
+
+```{r}
+training <- read.csv("train.csv", stringsAsFactors = FALSE, na.strings = "")
+testing <- read.csv("test.csv", stringsAsFactors = FALSE,na.strings = "")
+```
+
+Random partition of the training set into:
+
+- training: train different models
+- tune.test.set: initial out of the box performance
+
+```{r,results='markup'}
+library(caret)
+set.seed(1234)
+InTrain <- createDataPartition(y=training$Survived,p = 0.7,list = FALSE)
+tune.test.set <- training[-InTrain,]
+training <- training[InTrain,]
+```
+
+Summarize the training data set:
+
+```{r}
+summary(training)
+table(training$Sex)
+table(training$Embarked)
+table(training$Survived)
+```
+
+The data is imbalanced in terms of gender as well as the outcome class. However, this would not prevent us from developing classifiers. It will probably make it harder though!
+
+___
+
+# Developing expectations from the data: basic exploratory data analysis
+
+Let's start developing expectations from the data. Note that we will only use the training data set for exploration and feature engineering. This is importnat to avoid overfitting and decreasing the bias in our final out-of the sample accuracy. 
+
+___
+
+## Relationships between Age and Family size
+```{r}
+#Exploration by pairs plot:
+
+pairs(Survived ~ Age+ SibSp+Parch+Fare,pch =19, cex = 0.4,data=training,
+      col= ifelse(training$Survived == 1, "navy","red"))
+
+```
+Without concluding too much from this plot, we can immediately start noticing certain relationships. 
+
+- Age and SibSp, and Age and Parch are inversely related. This is intuitive as older individuals are expected to have larger family sizes.
+- There seems to be a relationship between Age, Fare (and perhaps Pclass) and Survival. We will explore this further.
+
+___
+
+## The survival probability of lower fare class passengers is significantly lower than 1st class passengers  
+
+An intuitive possibility is that more passengers who travel in the higher cabin classes might be survived. 
+
+```{r}
+table(training$Survived,training$Pclass)
+```
+
+We see that clearly less people survived from the 2nd and 3rd classes. We can go ahead and test if that difference is statistically significant. Fitting a logistic regression model between these two variables proves that indeed, **the probability of survival is significantly low in 2nd class compared to 1st class, and it is also significantly lower in 3rd class, compared to 2nd and 1st class passengers (p < 0.001).**
+
+```{r}
+summary(glm(factor(Survived) ~ factor(Pclass), data = training, family = "binomial"))
+```
+
+Therefore, the Pclass feature is an important one to keep in our data set.
+
+___
+
+## Females have statistically significant higher probability of survival
+
+In the event of crisis, it is expected that women and children will get the priority in the rescue efforts. We indeed notice that more females were survived, despite their small proportion.
+```{r}
+table(training$Survived,training$Sex)
+```
+
+We can also investigate if this difference is statistically significant by fitting a logistic regression model. The beauty of logistic regression is that we can tailor our scientific question by including potential confounders into the model. In this case we suspect that Age could be a confounder for the observed relationship between Sex and Survival. We also add the interaction term to see if the effect of Sex is modified by Age as well.
+
+```{r}
+summary(glm(Survived ~  Age*Sex, data = training, family = "binomial"))
+```
+
+Fascinating! First, we notice that indeed males have significantly lower probability of survival (p < 0.01) even after adjusting for Age and the interaction between Sex and Age. It is also worth to note that there is statistically significant interaction between Age and Sex predictors (p < 0.05). 
+
+**Therefore, sex is another feature we will definitely keep to train our classifiers.**
+
+___
+
+## Fare variable: does it explain any variability beyond Pclass? 
+
+As we expected from the PClass - Survival relationship, passengers who paid higher are mostly those who survived:
+
+```{r}
+
+qplot(y = log(Fare), x = factor(Survived), data = training, geom = "boxplot", fill = factor(Survived))+theme_bw()+scale_fill_manual(values = c("red","blue"))
+
+```
+
+The question is: does Fare feature explain any variability beyond the Pclass? If not, we should drop this feature since we don't need two collinear features when training our classifiers. This will make our estimates biased.
+
+When we fit Pclass together with Fare:
+```{r}
+summary(glm(Survived ~ factor(Pclass) + Fare, data = training, family = "binomial"))
+```
+
+Interestingly, we notice that Fare still remains significant (p < 0.05) in the presence of the Pclass feature. This implies that there is additional variability in the Survival outcome that is explained by Fare, perhaps because this is a continuous variable and Pclass is categorical. Therefore, it seems feasible that they explain some non-overlapping variance.
+
+We will also keep Fare feature to train our model.
+
+___
+
+# Feature Engineering
+
+At this stage we will continue to explore the training data set, with the difference that we will try to extract/engineer different features that are not immediately available to us. We will perform preliminary analyses to test the potential utility of these features. 
+
+As always, we will perform all feature engineering, imputation and dimension reduction in the training data set and will apply into the test data sets exactly in the same way.
+
+___
+
+## Generate categorical variables
+
+It is more useful to model a few features as categorical variables:
+
+```{r}
+training <- transform(training,Survived = factor(Survived), Pclass = factor(Pclass),
+          Sex = factor(Sex),SibSp = factor(SibSp), Parch = factor(Parch), Embarked = factor(Embarked))
+tune.test.set <- transform(tune.test.set,Survived = factor(Survived), Pclass = factor(Pclass),Sex = factor(Sex),SibSp = factor(SibSp), Parch = factor(Parch), Embarked = factor(Embarked))
+
+testing <- transform(testing, Pclass = factor(Pclass),
+          Sex = factor(Sex),SibSp = factor(SibSp), Parch = factor(Parch), Embarked = factor(Embarked))
+
+```
+
+___
+
+## Remove the passenger ID column from the training sets
+
+This feature has no classification power and will generate bias in our classifiers:
+
+```{r}
+library(dplyr)
+training <- dplyr::select(training,-PassengerId)
+tune.test.set <- dplyr::select(tune.test.set,-PassengerId)
+```
+
+___
+
+## Investigate the missing values: explore opportunities for imputation
+
+```{r}
+training.na <- as.data.frame(is.na(training));names(training.na) <- names(training)
+apply(training.na,2,sum)
+```
+
+We notice that missing values appear in 3 variables; Age, Cabin and Embarked.
+
+___
+
+### Cabin feature: more than 75% missing data
+
+From the available observations, we can infer that the first letter actually presents the cabin section. Let's extract the first letter from the available ones and test if they have any predictive value:
+
+```{r}
+library(ggplot2); library(dplyr)
+Cabin.letter <-substr(training$Cabin[!training.na$Cabin],1,1)
+Cabin.survival <- training$Survived[!training.na$Cabin]
+Cabin.Pclass <- training$Pclass[!training.na$Cabin]
+qplot(x = factor(Cabin.letter), fill = Cabin.survival)+scale_fill_manual(values = c("red","navy"))+theme_bw()
+```
+
+We notice that this feature might have some predictive value. Let's check if the cabin relates with the Pclass:
+
+```{r}
+qplot(x = factor(Cabin.letter), fill = Cabin.Pclass)+scale_fill_manual(values = c("red","navy","green"))+theme_bw()
+```
+
+We indeed notice that Cabin letters A,B,C are absolutely first class and therefore can be inferred from the Pclass variable. D and E are also more likely to be in 1st class. Gs are all coming from the 3rd Class. 
+
+We can also check if fare relates with the cabin letter:
+```{r}
+Cabin.Fare <- training$Fare[!training.na$Cabin]
+qplot(x = factor(Cabin.letter), y=Cabin.Fare, color = Cabin.survival)+scale_color_manual(values = c("red","navy"))+theme_bw()
+```
+The relationship between Fare and Cabin Letter is not so dramatic to allow some imputation. 
+
+**The problem with imputing Cabin feature from Pclass is that we don't know whether the missing variables are MCAR (Missing Completely at Random) or whether there is a relationship between the reason they are missing and the outcome (Survival).**
+
+Therefore, it would be more sensible to drop this variable and don't use in building our classifiers.
+
+Remove Cabin feature from all data sets:
+
+```{r}
+library(dplyr)
+training <- dplyr::select(training, - Cabin)
+tune.test.set <- dplyr::select(tune.test.set, -Cabin)
+testing <- dplyr::select(testing, -Cabin)
+```
+
+___
+
+### Age feature: imputing missing data by using a multivariate linear model
+
+We recall the relationship between Age and family size from our earlier pairs plot. Therefore, one intuitive imputation potential would be comparing the Age with SibSp feature:
+
+```{r}
+qplot(x = SibSp, y = Age, color = Survived, data = training)+
+       theme_bw()+scale_color_manual(values = c("red","navy"))+theme_bw()
+  
+```
+
+We notice that as the SibSp increases, the age group decreases. Let's look at the distribution of Age across the SibSp bins. 
+
+```{r,fig.width=9}
+ggplot(data = training, aes(x = Age, fill= Survived))+
+        geom_histogram(bins = 40)+facet_grid(. ~ SibSp)+ scale_fill_manual(values = c("red","navy"))+
+        theme_bw()
+```
+
+Aha! Most of the Age distribution is having either no Spouses or siblings or only 1.  For the 1 siblings/spouses group **the mean age seems to be higher.** In both cases Age is approximated by normal distribution. The problem with SibSp is that some of the factor levels are only present in the observations where Age is missing, making this predictor unbalanced across the missing and complete cases.
+
+It would be also interesting to explore gender differences when considering Age:
+
+```{r, fig.width=9}
+ggplot(data = training, aes(x = Age, fill= Survived))+
+        geom_histogram(bins = 40)+facet_grid(. ~ Sex)+ scale_fill_manual(values = c("red","navy"))+
+        theme_bw()
+```
+
+How about the Age distribution in different passenger classes? (Pclass):
+
+```{r,fig.width=9}
+ggplot(data = training, aes(x = Age, fill= Survived))+
+        geom_histogram(bins = 40)+facet_grid(. ~ Pclass)+ scale_fill_manual(values = c("red","navy"))+
+        theme_bw()
+as.data.frame(training %>% group_by(Pclass,Survived) %>% summarise(mean.Age = mean(Age,na.rm=T)))
+```
+
+This is quite interesting! In all passenger classes, the mean age of the survived passengers is lower than those passed away. We also notice that the mean age decreases and the Class number increases, i.e: older passengers are in the better classes on average. Therefore, Pclass would also be include in the imputation model.
+
+**It would be therefore sensible to impute Age by random gaussian imputation using the mean and standard deviation of individual factor levels of these predictors. We will include Sex in this model to account for gender-specific differences in Age, as well as Pclass to account for the interesting seperation of Age by Passenger Class we noted above.**
+
+In order to do this more rigorously, we can first fit a linear model with the existing Age , Sex  and Pclass  data:
+
+#### Fitting multivariate Age imputation model
+
+The model will become:
+
+Age ~  Sex + Pclass + e (random gaussian error)
+
+```{r,fig.width=9,fig.height=8}
+lmAge = lm(Age ~ Sex + Pclass, data = training, na.action = "na.omit")
+summary(lmAge)
+par(mfrow = c(2,2))
+plot(lmAge)[1]
+plot(lmAge)[2]
+plot(lmAge)[3]
+plot(lmAge)[4]
+```
+
+This model is just OK, but we don't need the perfect model for this type of imputation. Nice to see that both variance and normality assumptions of the model holds and all levels of the covariates have significant impact on the mean outcome in the presence of each other. This would give us a good estimation for the missing values of Age.
+
+Just to check if our imputation model yields the similar distribution as the original age:
+
+```{r,fig.width=9}
+complete.cases.Age <- training$Age[complete.cases(training$Age)]
+after.imputation.Age <-c(complete.cases.Age,predict(lmAge, newdata = training[is.na(training$Age),]))
+just.imputed.observations.Age <- after.imputation.Age[!complete.cases(training$Age)]
+
+par(mfrow = c(1,3))
+hist(complete.cases.Age,breaks = 20,col = "navy");
+hist(after.imputation.Age,breaks = 20,col = "lightgreen");
+hist(just.imputed.observations.Age,breaks = 20, col = "purple")
+
+```
+
+Therefore, our imputation model performs a nice job!
+
+Using the model to impute missing values of Age:
+
+```{r}
+training$Age[is.na(training$Age)] = predict(lmAge, newdata = training[is.na(training$Age),])
+tune.test.set$Age[is.na(tune.test.set$Age)] = predict(lmAge, newdata = tune.test.set[is.na(tune.test.set$Age),])
+testing$Age[is.na(testing$Age)] = predict(lmAge, newdata = testing[is.na(testing$Age),])
+```
+
+Note that we use the same model object we derived from the training data set to impute the missing values of Age for all data sets. This will prevent us from overfitting to the test data set.
+
+Re-investigate the missing values:
+
+```{r}
+training.na <- as.data.frame(is.na(training));names(training.na) <- names(training)
+tune.testing.na <- as.data.frame(is.na(tune.test.set));names(tune.testing.na) <- names(tune.test.set)
+testing.na <- as.data.frame(is.na(testing));names(testing.na) <- names(testing)
+data.frame(apply(training.na,2,sum),apply(tune.testing.na ,2,sum),apply(testing.na ,2,sum))
+```
+
+It appears that only one case is left missing in each of the data sets. We will consider this as random missingness and remove in each data set:
+
+```{r}
+training <- training[complete.cases(training),]
+tune.test.set <- tune.test.set[complete.cases(tune.test.set),]
+testing <- testing[complete.cases(testing),]
+```
+
+Now we have completed processing the missing values.
+
+## Generate Dummy Variables with Factor variables

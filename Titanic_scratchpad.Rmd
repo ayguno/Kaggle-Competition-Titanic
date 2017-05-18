@@ -199,6 +199,19 @@ plot(lmAge)[4]
 ```
 This model is just OK, but we don't need the perfect model for this type of imputation. Nice to see that both variance and normality assumptions of the model holds and all levels of the covariates have significant impact on the mean outcome in the presence of each other. This would give us a good estimation for the missing values of Age.
 
+Just to check if our imputation model yields the similar distribution as the original age:
+```{r}
+complete.cases.Age <- training$Age[complete.cases(training$Age)]
+after.imputation.Age <-c(complete.cases.Age,predict(lmAge, newdata = training[is.na(training$Age),]))
+just.imputed.observations.Age <- after.imputation.Age[!complete.cases(training$Age)]
+
+par(mfrow = c(1,3))
+hist(complete.cases.Age,breaks = 20,col = "navy");
+hist(after.imputation.Age,breaks = 20,col = "lightgreen");
+hist(just.imputed.observations.Age,breaks = 20, col = "purple")
+
+```
+Therefore, our imputation performs a nice job 
 Using the model to impute missing values of Age:
 
 ```{r}
@@ -562,3 +575,282 @@ tune.testing.accuracy
 
 Based on the prediction in the tune.test.set, Random Forest classification tree gave the highest out of the box accuracy. The accuracy is ~ 83.3 %. 
 
+
+___
+
+Conclude the report here, the rest is just further model tuning, which did not further improve the accuracy. In the future, I may try to perform model stacking/ensembling, also try other types of feature engineering as I learn different approaches. 
+___
+
+# Tuning with trainControl()
+
+- Random Forest (method = "rf") with bootstrap632
+
+**Note that using boot632 method for training increased in sample accuracy to 88%**
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+RF.tune <- train(Survived ~ ., data = training,method = "rf", trControl = trainControl(method = "boot632", number = 10) )
+saveRDS(RF.tune,"RFtune.rds") #Save model object for future loading if necessary
+
+```
+
+**Next evaluate LOOCV method. This take a long time to train with RF**
+
+
+
+
+### What if we had used dimension reduction?
+
+```{r}
+prePCA.training <- preProcess(training[,-1],method = "pca")
+PCA.training <- predict(prePCA.training,training[,-1])
+PCA.training$Survived <- training$Survived
+qplot(PCA.training$PC1,PCA.training$PC2, color = Survived, data = PCA.training)
+qplot(PCA.training$PC2,PCA.training$PC3, color = Survived, data = PCA.training)
+qplot(PCA.training$PC1,PCA.training$PC3, color = Survived, data = PCA.training)
+
+```
+The seperation is indeed quite good.
+
+Let's try to fit models by using the Principal components, instead of the original data:
+
+
+
+- Simple classification tree (method = "rpart") with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+RPART.PCA <- train(Survived ~ ., data = PCA.training,method = "rpart", trControl = trainControl(method = "cv", number = 10))
+saveRDS(RPART.PCA,"RPART.PCA.rds") #Save model object for future loading if necessary
+```
+
+- Random Forest (method = "rf") with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+RF.PCA <- train(Survived ~ ., data = PCA.training,method = "rf", trControl = trainControl(method = "cv", number = 10)) 
+saveRDS(RF.PCA,"RF.PCA.rds") #Save model object for future loading if necessary
+
+```
+
+- Boosted tree (method = "gbm") with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+GBM.PCA <- train(Survived ~ ., data = PCA.training,method = "gbm", trControl = trainControl(method = "cv", number = 10), verbose = FALSE) 
+saveRDS(GBM.PCA,"GBM.PCA.rds") #Save model object for future loading if necessary
+```
+
+- support vector machines with a radial kernel
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+SVM.PCA <- train(Survived ~ ., data = PCA.training,method = "svmRadial", trControl = trainControl(method = "cv", number = 10))
+# Takes very long time to run!!
+saveRDS(SVM.PCA,"SVM.PCA.rds")
+```
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+# Using resamples function from the caret package to summarize the data
+
+modelsummary.PCA <- resamples(list(RPART=RPART.PCA,RF=RF.PCA,GBM=GBM.PCA,SVM=SVM.PCA))
+
+# In-sample accuracy values for each model
+summary(modelsummary.PCA)$statistics$Accuracy
+
+# If necessary we can also produce 'variable importance' plots to see which variables are making most contributions #to each model
+dotPlot(varImp(RPART.PCA))
+dotPlot(varImp(RF.PCA))
+dotPlot(varImp(SVM.PCA))
+dotPlot(varImp(GBM.PCA))
+```
+Not so much improvement of in sample accuracy. 
+
+What happens if we had only used the first 3 PCs?
+
+- Simple classification tree (method = "rpart") with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+RPART.PCA3 <- train(Survived ~ PC1 + PC2 + PC3 , data = PCA.training,method = "rpart", trControl = trainControl(method = "cv", number = 10))
+saveRDS(RPART.PCA3,"RPART.PCA3.rds") #Save model object for future loading if necessary
+```
+
+- Random forest with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+RF.PCA3 <- train(Survived ~ PC1 + PC2 + PC3 , data = PCA.training,method = "rf", trControl = trainControl(method = "cv", number = 10))
+saveRDS(RF.PCA3,"RF.PCA3.rds") #Save model object for future loading if necessary
+```
+Not improved,either.
+
+# Stepping back
+
+What if we didn't perform extensive feature engineering?:
+
+Being simplistic, what if we just performed a complete case analysis with few seemingly important variables?
+
+Going back to our EDA, we noted that the features:
+
+- Sex
+- Pclass
+- Age
+- Parch
+- SibSp
+- Fare
+
+showed some seperation. Let's just focus on these features and perform a complete case analysis:
+
+```{r}
+simplfied.features <- "Sex|Pclass|Age|Parch|SibSp|Fare|Survived"
+training.simplified <- training[,grepl(simplfied.features,names(training))]
+tune.test.set.simplified <- tune.test.set[,grepl(simplfied.features,names(tune.test.set))]
+```
+
+- Simple classification tree (method = "rpart") with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+RPART.simp <- train(Survived ~ . , data = training.simplified,method = "rpart", trControl = trainControl(method = "cv", number = 10))
+```
+
+- SVM -linear with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+SVM.simp <- train(Survived ~ . , data = training.simplified,method = "svmLinear3", trControl = trainControl(method = "cv", number = 10))
+```
+
+- Gradient boosted tree with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+GBM.simp <- train(Survived ~ . , data = training.simplified,method = "gbm", trControl = trainControl(method = "cv", number = 1000))
+```
+
+# Stepping back again
+
+What if we modeled the factor features such as Pclass and Parch as continuous variables?:
+
+Load the data sets:
+
+```{r}
+training <- read.csv("train.csv", stringsAsFactors = FALSE, na.strings = "")
+testing <- read.csv("test.csv", stringsAsFactors = FALSE,na.strings = "")
+```
+
+Partition the training set into:
+
+- training: train different models
+- tune.test.set: initial out of the box performance
+
+```{r,results='markup'}
+library(caret)
+set.seed(1234)
+InTrain <- createDataPartition(y=training$Survived,p = 0.7,list = FALSE)
+
+tune.test.set <- training[-InTrain,]
+training <- training[InTrain,]
+
+```
+
+Going back to our EDA, we noted that these features showed some seperation:
+
+- Sex
+- Pclass
+- Age
+- Parch
+- SibSp
+- Fare
+
+Let's limit our training set to these variables for now and get some in sample prediction accuracy. In this case we are modeling all features except Sex as continuous variable:
+
+```{r}
+library(dplyr)
+Survived <- factor(training$Survived)
+training <- dplyr::select(training, Sex, Pclass,Age,Parch,SibSp,Fare)
+training$male <- ifelse(training$Sex == "male",1,0)
+training <- dplyr::select(training, -Sex) %>% mutate(Survived = Survived)
+
+```
+
+###Impute Age feature:
+
+
+```{r}
+lmAge = lm(Age ~ male + Pclass, data = training, na.action = "na.omit")
+summary(lmAge)
+par(mfrow = c(2,2))
+plot(lmAge)[1]
+plot(lmAge)[2]
+plot(lmAge)[3]
+plot(lmAge)[4]
+```
+
+Just to check if our imputation model yields the similar distribution as the original age:
+```{r}
+complete.cases.Age <- training$Age[complete.cases(training$Age)]
+after.imputation.Age <-c(complete.cases.Age,predict(lmAge, newdata = training[is.na(training$Age),]))
+just.imputed.observations.Age <- after.imputation.Age[!complete.cases(training$Age)]
+
+par(mfrow = c(1,3))
+hist(complete.cases.Age,breaks = 20,col = "navy");
+hist(after.imputation.Age,breaks = 20,col = "lightgreen");
+hist(just.imputed.observations.Age,breaks = 20, col = "purple")
+
+```
+Therefore, our imputation performs a nice job 
+
+Using the model to impute missing values of Age:
+
+```{r}
+training$Age[is.na(training$Age)] = predict(lmAge, newdata = training[is.na(training$Age),])
+
+
+```
+
+
+- Simple classification tree (method = "rpart") with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+RPART.cont <- train(Survived ~ . , data = training,method = "rpart", trControl = trainControl(method = "cv", number = 10))
+```
+
+- Gradient boosted tree with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+GBM.cont <- train(Survived ~ . , data = training,method = "gbm", trControl = trainControl(method = "cv", number = 10), verbose = FALSE)
+```
+
+- Random Forest classifier (method = "rf") with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+RF.cont <- train(Survived ~ . , data = training,method = "rf", trControl = trainControl(method = "cv", number = 100))
+```
+
+
+- Logistic regression classifier (method = "glm") with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+GLM.cont <- train(Survived ~ . , data = training,method = "glm", trControl = trainControl(method = "cv", number = 100))
+```
+
+- Linear Discriminant Analysis (method = "lda") with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+LDA.cont <- train(Survived ~ . , data = training,method = "lda", trControl = trainControl(method = "cv", number = 100))
+```
+
+- Support Vector Machines (method = "svmRadial") with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+SVM.cont <- train(Survived ~ . , data = training,method = "svmRadial", trControl = trainControl(method = "cv", number = 150))
+```
+This approach also yields ~ 81% in sample accuracy as maximum. 
