@@ -192,7 +192,7 @@ It would be therefore sensible to impute Age by random gaussian imputation using
 lmAge = lm(Age ~ Sex + Pclass, data = training, na.action = "na.omit")
 summary(lmAge)
 par(mfrow = c(2,2))
-plot(lmAge)[1]
+plot(lmAge)[1:4]
 plot(lmAge)[2]
 plot(lmAge)[3]
 plot(lmAge)[4]
@@ -280,14 +280,10 @@ After doing that we notice that there are differences in the factor levels of ce
 ```{r}
 training <- training[,names(training) %in% names(tune.test.set)]
 tune.test.set <- tune.test.set[,names(tune.test.set) %in% names(training)]
-
 identical(names(training),names(tune.test.set))
-
 PassengerId <- testing$PassengerId
-
 testing <- testing[,names(testing) %in% names(training)]
 testing$PassengerId <- PassengerId
-
 ```
 
 ### Feature engineering with Name and Ticket variables
@@ -322,7 +318,6 @@ We note that at least two groups of ticket numbers are associated with higher fa
 
 ```{r}
 # Feature Engineering function
-
 num.Ticket <- function(x){
 Ticket <- toupper(x$Ticket)
 # Better to remove anything left of the last white space
