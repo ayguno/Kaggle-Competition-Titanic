@@ -11,9 +11,11 @@ output:
         highlight: tango
         df_print: paged
 ---
-# Introduction
+# Introduction and summary
 
+This is my first journey on a Kaggle data set. I will try to explore the Titanic data set by using simple, parsimonious linear models, then perform feature engineering, missing value imputation and dimension reduction. Finally, I train classifiers by using random forest, support vector machines, gradient boosted trees algorithms. I will also explore stacking these classifiers and model tuning to improve accuracy of the predictions for survival. 
 
+As a life long learner, I highly appreciate comments, suggestions and feedback on my approaches from the Kaggle community. Thanks for reading my Kernel and have a great time here!
 ___
 
 # Loading and partitioning the data
@@ -61,7 +63,7 @@ ___
 
 # Developing expectations from the data: basic exploratory data analysis
 
-Let's start developing expectations from the data. Note that we will only use the training data set for exploration and feature engineering. This is importnat to avoid overfitting and decreasing the bias in our final out-of the sample accuracy. 
+Let's start developing expectations from the data. Note that we will only use the training data set for exploration and feature engineering. This is important to avoid over-fitting and decreasing the bias in our final out-of the sample accuracy. 
 
 ___
 
@@ -276,16 +278,13 @@ In order to do this more rigorously, we can first fit a linear model with the ex
 
 The model will become:
 
-Age ~  Sex + Pclass + e (random gaussian error)
+Age ~  Sex + Pclass + e (random Gaussian error)
 
 ```{r,fig.width=9,fig.height=8}
 lmAge = lm(Age ~ Sex + Pclass, data = training, na.action = "na.omit")
 summary(lmAge)
 par(mfrow = c(2,2))
-plot(lmAge)[1]
-plot(lmAge)[2]
-plot(lmAge)[3]
-plot(lmAge)[4]
+plot(lmAge)[1:4]
 ```
 
 This model is just OK, but we don't need the perfect model for this type of imputation. Nice to see that both variance and normality assumptions of the model holds and all levels of the covariates have significant impact on the mean outcome in the presence of each other. This would give us a good estimation for the missing values of Age.
@@ -301,7 +300,6 @@ par(mfrow = c(1,3))
 hist(complete.cases.Age,breaks = 20,col = "navy");
 hist(after.imputation.Age,breaks = 20,col = "lightgreen");
 hist(just.imputed.observations.Age,breaks = 20, col = "purple")
-
 ```
 
 Therefore, our imputation model performs a nice job!
@@ -314,7 +312,7 @@ tune.test.set$Age[is.na(tune.test.set$Age)] = predict(lmAge, newdata = tune.test
 testing$Age[is.na(testing$Age)] = predict(lmAge, newdata = testing[is.na(testing$Age),])
 ```
 
-Note that we use the same model object we derived from the training data set to impute the missing values of Age for all data sets. This will prevent us from overfitting to the test data set.
+Note that we use the same model object we derived from the training data set to impute the missing values of Age for all data sets. This will prevent us from over-fitting to the test data set.
 
 Re-investigate the missing values:
 
@@ -335,4 +333,397 @@ testing <- testing[complete.cases(testing),]
 
 Now we have completed processing the missing values.
 
-## Generate Dummy Variables with Factor variables
+## Generate Dummy Variables with Categorical variables
+
+Before we start building our classifiers, it is desirable to convert the categorical variables to dummy variables (0 or 1). This will preserve the parsimony if later we need to interpret the results of any decision trees. Furthermore, many machine learning packages work well with dummy variables.
+
+```{r}
+library(caret)
+which(sapply(training[,-1],is.factor))
+# There are 5 categorical predictors in out data set
+factors.training <- which(sapply(training,is.factor))
+factors.tune.test.set <- which(sapply(tune.test.set,is.factor))
+factors.testing <- which(sapply(testing,is.factor))
+
+dummies.training <- dummyVars(Survived ~ Pclass + Sex + SibSp + Parch + Embarked, data = training)
+dummies.tune.test.set <- dummyVars(Survived ~ Pclass + Sex + SibSp + Parch + Embarked, data = tune.test.set)
+dummies.testing <- dummyVars(PassengerId ~ Pclass + Sex + SibSp + Parch + Embarked, data = testing)
+
+# Add the dummy variables to both training and test data sets, simultaneously removing the existing factor variables:
+training <- cbind(training[,-factors.training[-1]], predict(dummies.training,newdata = training))
+tune.test.set <- cbind(tune.test.set[,-factors.tune.test.set[-1]], predict(dummies.tune.test.set,newdata = tune.test.set))
+testing <- cbind(testing[,-factors.testing], predict(dummies.testing,newdata = testing))
+```
+
+That was lots of code! Still, using caret package makes the process less cumbersome. 
+
+After doing that we notice that there are differences in the factor levels of certain variables are not present in the training set and test sets. These are present in Parch and SibSp features. The lower levels of these variables are conserved in all sets and they represent most of the data. At this stage we will only keep features that are present in all sets:
+
+```{r}
+training <- training[,names(training) %in% names(tune.test.set)]
+tune.test.set <- tune.test.set[,names(tune.test.set) %in% names(training)]
+identical(names(training),names(tune.test.set))
+PassengerId <- testing$PassengerId
+testing <- testing[,names(testing) %in% names(training)]
+testing$PassengerId <- PassengerId
+```
+
+___
+
+## Feature engineering with Name and Ticket variables
+
+### Ticket feature: sub-clusters with classification value
+
+It would be interesting to just convert the ticket feature to numeric and see if it has any classification value:
+
+```{r, cache= TRUE, fig.width= 9}
+
+Ticket <- toupper(training$Ticket)
+# Better to remove anything left of the last white space
+w <- grep(" ", Ticket)
+last.space<- sapply(gregexpr(" ",Ticket[w]), function(y){
+        max(y[1])
+})
+
+Ticket[w] <- substring(Ticket[w],last.space+1)
+
+Ticket <- gsub(" ","", Ticket)
+Ticket <- gsub("[A-Z]","",Ticket)
+Ticket <- gsub("\\.","",Ticket)
+Ticket <- gsub("\\/","", Ticket)
+Ticket <- as.numeric(Ticket)
+Ticket[is.na(Ticket)] = 0
+Ticket <- as.numeric(Ticket)
+
+qplot(x=Ticket, y = Fare, data = training, color = Survived)+theme_bw()+scale_color_manual(values = c("red","navy"))
+
+```
+
+We note that at least two groups of ticket numbers are associated with higher fares, and to some extent they seperate the outcome classes. Therefore, we will engineer this numeric feature and add into all sets, we will remove the original variable.
+
+```{r}
+# Feature Engineering function
+num.Ticket <- function(x){
+Ticket <- toupper(x$Ticket)
+# Better to remove anything left of the last white space
+w <- grep(" ", Ticket)
+last.space<- sapply(gregexpr(" ",Ticket[w]), function(y){
+        max(y[1])
+})
+Ticket[w] <- substring(Ticket[w],last.space+1)
+
+Ticket <- gsub(" ","", Ticket)
+Ticket <- gsub("[A-Z]","",Ticket)
+Ticket <- gsub("\\.","",Ticket)
+Ticket <- gsub("\\/","", Ticket)
+Ticket <- as.numeric(Ticket)
+Ticket <- as.numeric(Ticket)
+return(Ticket)
+}
+
+training$num.Ticket <- num.Ticket(training)
+tune.test.set$num.Ticket <- num.Ticket(tune.test.set)
+testing$num.Ticket <- num.Ticket(testing)
+
+sum(is.na(training$num.Ticket ))
+sum(is.na(tune.test.set$num.Ticket ))
+sum(is.na(testing$num.Ticket))
+```
+
+After this conversion, only 2 missing values were introduced to training and tune.testing data sets.
+
+### Name feature: getting 'titles' out of it
+
+When looking into the names of the passengers, we notice that at least we can attempt to extract a "title" feature from the name strings and explore its relationship with the outcome:
+
+```{r}
+Pass.Names <- training$Name
+first.comma<- sapply(gregexpr(",",Pass.Names), function(y){
+        y[1][1]
+})
+first.dot <- sapply(gregexpr("\\.",Pass.Names), function(y){
+        y[1][1]
+})
+Titles <- substr(Pass.Names,first.comma+2,first.dot-1)
+qplot(x = factor(Titles), y = Age ,color = Survived, data = training)
+```
+
+This feature can also be useful, therefore we will add into the data sets:
+
+```{r}
+# Feature engineering function:
+Titles <- function(x){
+      Pass.Names <- x$Name
+first.comma<- sapply(gregexpr(",",Pass.Names), function(y){
+        y[1][1]
+})
+first.dot <- sapply(gregexpr("\\.",Pass.Names), function(y){
+        y[1][1]
+})
+Titles <- substr(Pass.Names,first.comma+2,first.dot-1)  
+return(Titles)
+}
+
+training$Titles <- factor(Titles(training))
+tune.test.set$Titles <- factor(Titles(tune.test.set))
+testing$Titles <- factor(Titles(testing))
+```
+
+Next, we need to create dummy variables from each of these titles:
+
+```{r}
+factors.training <- which(sapply(training,is.factor))
+factors.tune.test.set <- which(sapply(tune.test.set,is.factor))
+factors.testing <- which(sapply(testing,is.factor))
+
+dummies.training <- dummyVars(Survived ~ Titles, data = training)
+dummies.tune.test.set <- dummyVars(Survived ~ Titles, data = tune.test.set)
+dummies.testing <- dummyVars(PassengerId ~ Titles, data = testing)
+```
+
+We then add the dummy variables to both training and test data sets, simultaneously removing the existing factor variables:
+
+```{r}
+training <- cbind(training[,-factors.training[-1]], predict(dummies.training,newdata = training))
+tune.test.set <- cbind(tune.test.set[,-factors.tune.test.set[-1]], predict(dummies.tune.test.set,newdata = tune.test.set))
+testing <- cbind(testing[,-factors.testing], predict(dummies.testing,newdata = testing))
+```
+
+Not surprisingly ,after doing that we notice that there are differences in the factor levels of Titles feature. At this stage we will only keep features that are present in all sets:
+
+```{r}
+training <- training[,names(training) %in% names(tune.test.set)]
+tune.test.set <- tune.test.set[,names(tune.test.set) %in% names(training)]
+identical(names(training),names(tune.test.set))
+PassengerId <- testing$PassengerId
+testing <- testing[,names(testing) %in% names(training)]
+testing$PassengerId <- PassengerId
+```
+
+We should also remove the original Ticket and Name features from all data sets since we already have the engineered versions included:
+
+```{r}
+training <- dplyr::select(training,-Ticket,-Name)
+tune.test.set <- dplyr::select(tune.test.set ,-Ticket,-Name)
+testing <- dplyr::select(testing,-Ticket,-Name)
+```
+
+Finally, since we had 2 missing values we generated due to the Ticket feature engineering, we need to get the complete cases in each of the data set:
+
+```{r}
+training <- training[complete.cases(training),]
+tune.test.set <- tune.test.set[complete.cases(tune.test.set),]
+testing <- testing[complete.cases(testing),]
+testing <- data.frame(PassengerId = testing$PassengerId, testing[,-27])
+```
+
+This completes the feature engineering for all data sets.
+
+___
+
+## Collinearity, Near Zero Variance and Dimension Reduction (Principal Components Analysis)
+
+We generated lots of features! While we had reasons for building them, now it is the chance to drop or transform them if we think that they might hurt us down the road.
+
+One reason why we might want to reduce dimension is the collinearity, where few features are perfectly correlated with each other. Another type are the features with near zero variance.
+
+### Near zero variance features
+
+Let's explore if there are near zero variance features in the training data set:
+
+```{r}
+nsv <- nearZeroVar(x = training, saveMetrics = TRUE)
+sum(!nsv$nzv)
+```
+
+Great we checked, indeed 7 features have near zero variance! We will drop them and keep the remaining 20 in our data sets.
+
+```{r}
+training <- training[,!nsv$nzv]
+tune.test.set <- tune.test.set[,!nsv$nzv]
+testing <- testing[,!nsv$nzv]
+```
+
+### Testing for collinearity
+
+Let's have a look at the collinearity in our training set:
+
+```{r}
+M <- abs(cor(training[,-1])) # M is an absolute value correlation matrix representing the pairwise #correlations between all variables 
+diag(M) <- 0 # We replace the diagonal values with zero (just because these are the correations with  #themselves we are not interested in capturing them).
+which(M > 0.8, arr.ind = TRUE) # What are the highest correated variables?
+unique(row.names(which(M > 0.8, arr.ind = TRUE)))
+cor.variables <- training[,unique(row.names(which(M > 0.8, arr.ind = TRUE)))]
+cor.variables$Survived <- training$Survived
+```
+
+We notice the expected features correlate with each other. These include Male gender and Title Mr. 
+
+The next question is: **should we replace these features with more statistically orthagonal features by using matrix transformation?**
+
+### Principal Components Analysis (PCA)
+
+A PCA would be handy to visualize whether indeed it is worth reducing the dimension in the space of highly correlated features in our training data set:
+
+```{r}
+
+prePCA <- preProcess(cor.variables[,-6],method = "pca")
+PCAcor <- predict(prePCA,cor.variables[,-6])
+qplot(PCAcor$PC1,PCAcor$PC2, color = Survived, data = cor.variables)+theme_bw()+scale_color_manual(values = c("red","navy"))
+qplot(PCAcor$PC3,PCAcor$PC2, color = Survived, data = cor.variables)+theme_bw()+scale_color_manual(values = c("red","navy"))
+```
+
+This was not too helpful, since even the first 3 principal components are unable to explain the variance. At least we have given a try!
+
+We will use the remaining 20 features to train our classifiers.
+
+# Training Classifiers
+
+Due to the classification nature of the problem, we will perform tree-based prediction algorithms and support vector machines to perform predictions. We will perform **10-fold cross validation** in our initial training to prevent over-fitting. We will also set the random number generator seed for reproducibility.
+
+## Simple classification tree with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE,}
+set.seed(125745)
+RPART <- train(Survived ~ ., data = training,method = "rpart", trControl = trainControl(method = "cv", number = 10))
+RPART
+```
+
+## Random Forest classifier with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE,}
+set.seed(125745)
+RF <- train(Survived ~ ., data = training,method = "rf", trControl = trainControl(method = "cv", number = 10)) 
+RF
+```
+
+## Boosted tree classifier with cross validation
+
+```{r,results='markup', message=FALSE,warning=FALSE,}
+set.seed(125745)
+GBM <- train(Survived ~ ., data = training,method = "gbm", trControl = trainControl(method = "cv", number = 10), verbose = FALSE) 
+GBM
+```
+
+## Support vector machines with a radial kernel
+
+```{r,results='markup', message=FALSE,warning=FALSE,}
+set.seed(125745)
+SVM <- train(Survived ~ ., data = training,method = "svmRadial", trControl = trainControl(method = "cv", number = 10))
+SVM
+```
+
+## Summarizing the in-sample accuracy metrics from the individual classifiers
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+# Using resamples function from the caret package to summarize the data
+modelsummary <- resamples(list(RPART=RPART,RF=RF,GBM=GBM,SVM=SVM))
+# In-sample accuracy values for each model
+summary(modelsummary)$statistics$Accuracy
+```
+
+If we consider the Median accuracy as our benchmark, the Random Forest classifier seems to have the best accuracy amongst the classifiers we trained. Our out of the sample accuracy by using the tune.test set will be much lower though.
+
+## 'Variable importance' plots for each classifier
+
+```{r}
+dotPlot(varImp(RPART))
+dotPlot(varImp(RF))
+dotPlot(varImp(SVM))
+dotPlot(varImp(GBM))
+```
+
+It is great to see that some of the features we engineered are amongst the most important features for training the classifiers!
+
+## Tuning and stacking the classifiers for improved accuracy
+
+### Random Forest classifier with bootstrap and 632 correction
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+RF.tune <- train(Survived ~ ., data = training,method = "rf", trControl = trainControl(method = "boot632", number = 10) )
+median(RF.tune$results$Accuracy)
+```
+
+Great! Using this approach increased in sample accuracy to almost 88%!
+
+### Stacking classifiers
+
+Let's try to build a **'classifier of classifiers'** by using the predictions from the individual predictors. Ideally we should perform this in a seperate test set, however the data set we have is relatively small so we will have to reuse the predictions from the test data set.
+
+```{r}
+in.sample.predictions <- data.frame(RF.tune = predict(RF.tune,training), RF = predict(RF, training), GBM = predict(GBM,training), RPART = predict(RPART, training), SVM = predict(SVM, training))
+
+# Add the outcome
+in.sample.predictions$Survived <- training$Survived
+```
+
+We will stack these classifiers and train two more classifiers by using the Random Forest and Gradient boosted tree classifiers
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+RF.stack <- train(Survived ~ ., data = in.sample.predictions,method = "rf", trControl = trainControl(method = "cv", number = 10)) 
+RF.stack
+```
+
+```{r,results='markup', message=FALSE,warning=FALSE, cache=TRUE}
+set.seed(125745)
+GBM.stack <- train(Survived ~ ., data = in.sample.predictions,method = "gbm", trControl = trainControl(method = "cv", number = 10), verbose = FALSE) 
+GBM.stack
+```
+
+That is great! Stacking the classifiers really improved the accuracy and we have now over 99% in-sample accuracy. There might be a little bit over-fitting since we reused the training set multiple times, but we will asses our out-of the sample accuracy by using the tune.test.set.
+
+# Unbiased evaluation of the out-of-the box accuracy using the tune test set
+
+Before making our prediction with the actual test data set, it is a good idea to get an estimate of our out-of the box accuracy by using the tune.test.set we randomly partitioned initially. Since we haven't touched this data set for training our classifiers, this would be a good first hand estimate of the out-of-the box accuracy.
+
+Since we will use the stacked classifiers we constructed, we will have to follow the same procedure in the tune.test data set to perform predictions using our trained classifiers
+
+```{r}
+pred.tune.test.RF <- predict(RF, tune.test.set)
+pred.tune.test.RF.tune <- predict(RF.tune, tune.test.set)
+pred.tune.test.GBM <- predict(GBM, tune.test.set)
+pred.tune.test.RPART <- predict(RPART, tune.test.set)
+pred.tune.test.SVM <- predict(SVM, tune.test.set)
+
+tune.test.predictions <- data.frame(RF.tune = pred.tune.test.RF.tune, RF = pred.tune.test.RF, GBM = pred.tune.test.GBM, RPART = pred.tune.test.RPART, SVM = pred.tune.test.SVM)
+
+# Add the outcome from tune.test set
+tune.test.predictions$Survived <-tune.test.set$Survived
+
+```
+
+Next, make the predictions: 
+
+```{r}
+pred.tune.test.RF.stack <- predict(RF.stack,tune.test.predictions)
+pred.tune.test.GBM.stack <- predict(GBM.stack,tune.test.predictions)
+
+confusionMatrix(pred.tune.test.RF.stack, tune.test.set$Survived)
+confusionMatrix(pred.tune.test.GBM.stack, tune.test.set$Survived)
+```
+
+# Conclusions
+
+The out-of-the sample accuracy of the stacked classifiers is ~ 83%. This is probably because we did not use a third data set in between when stacking our classifiers. This likely caused over-fitting of the stacked classifiers and overestimation of the accuracy.
+
+Nevertheless, it was worth trying to build the stacked classifiers, as they still have improved accuracy relative to stand alone classifiers.
+
+# Final prediction and preparation of the submission
+
+Our final step is to make predictions using the unlabeled testing data set and prepare a submission file that matches our prediction with the Passenger IDs. We will use the stacked Random Forest classifier as it gave us the highest out-of-the sample accuracy:
+
+```{r}
+pred.test.RF <- predict(RF, testing[,-1])
+pred.test.RF.tune <- predict(RF.tune, testing[,-1])
+pred.test.GBM <- predict(GBM, testing[,-1])
+pred.test.RPART <- predict(RPART, testing[,-1])
+pred.test.SVM <- predict(SVM, testing[,-1])
+
+test.predictions <- data.frame(RF.tune = pred.test.RF.tune, RF = pred.test.RF , GBM = pred.test.GBM, RPART = pred.test.RPART, SVM = pred.test.SVM)
+
+pred.test.RF.stack <- as.numeric(as.character(predict(RF.stack,test.predictions)))
+
+```
+
