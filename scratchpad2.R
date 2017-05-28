@@ -72,6 +72,9 @@ final_testing <- dplyr::select(final_testing, -Sex)
 prePCA <- preProcess(training[,-1],method = "pca")
 PCAtraining <- predict(prePCA,newdata = training)
 
+
+
+
 qplot(x = PC1, y = PC2, data = PCAtraining, color = Survived, alpha = I(0.3))+theme_bw()+
         scale_color_manual(values = c("red","navy"))
 
@@ -86,7 +89,7 @@ qplot(x = PC1, y = PC3, data = PCAtraining, color = Survived, alpha = I(0.3))+th
 # Let's train some classifiers using PCA predictors
 
 set.seed(1234)
-PCAknn <- train(Survived ~ PC1 +PC2 +PC3, data = PCAtraining,method = "knn",
+PCAknn <- train(Survived ~ ., data = PCAtraining,method = "knn",
                 trControl= trainControl(method = "boot632"))
 
 # Takes a long time!
@@ -105,37 +108,94 @@ PCA.amdai <- train(Survived ~ ., data = PCAtraining,method = "amdai",
 
 # So far gives the best accuracy: (bench mark: 0.83)##############
 set.seed(1234)
-PCA.rf <- train(Survived ~ PC1 + PC2 + PC3, data = PCAtraining,method = "rf",
+PCA.rf <- train(Survived ~ ., data = PCAtraining,method = "rf",
                    trControl= trainControl(method = "boot632"))
 ##################################################################
 # Not as good as the PCA.rf
 set.seed(1234)
 PCA.gbm <- train(Survived ~ ., data = PCAtraining,method = "gbm",
-                trControl= trainControl(method = "boot632"), verbose =F)
-
-# Let's make a prediction by using final testing set:
-
-PCAtesting <- predict(prePCA,newdata = final_testing)
-predictions <- predict(PCA.rf,PCAtesting[,-1])
-
-prediction.table <- data.frame(PassengerId = final_testing$PassengerId, 
-                               Survived = predictions)
-
-write.csv(prediction.table,"PCArf_predictions.csv", row.names = F)
-
-# This prediction has 0.74 test accuracy, similar to earlier feature engineered classifier.
+                trControl= trainControl(method = "boot632", number = 200),verbose =F)
 
 # Not as good as the PCA.rf
 set.seed(1234)
 PCA.lda <- train(Survived ~ ., data = PCAtraining,method = "lda",
                  trControl= trainControl(method = "boot632"), verbose =F)
 
+# Not as good as the PCA.rf
+set.seed(1234)
+PCA.svm <- train(Survived ~ ., data = PCAtraining,method = "svmRadial",
+                 trControl= trainControl(method = "boot632"), verbose =F)
 
-# # Takes long time and not better than rf, either.
-# set.seed(1234)
-# PCA.deepboost <- train(Survived ~ PC1 + PC2 + PC3, data = PCAtraining,method = "deepboost",
-#                 trControl= trainControl(method = "boot632"))
-# # Takes long time and not better than rf, either.
-# set.seed(1234)
-# PCA.lssvmLinear <- train(Survived ~ ., data = PCAtraining,method = "lssvmRadial",
-#                        trControl= trainControl(method = "cv"))
+# Let's make a prediction by using final testing set:
+
+PCAtesting <- predict(prePCA,newdata = final_testing)
+
+predictions <- NULL
+
+models <- list(PCA.lda,
+               PCA.gbm,
+               PCA.rf,
+               PCA.amdai,
+               PCAknn,
+               PCA.svm)
+
+predictions <- sapply(models, function(x){
+        temp <- as.numeric(as.character(predict(x,newdata = PCAtesting[,-1])))
+})
+
+prediction.table <- NULL
+for(i in seq_along(predictions)){
+        prediction.table <- data.frame(PassengerId = final_testing$PassengerId, 
+                                          Survived = predictions[,i])   
+        write.csv(prediction.table,paste0("PCA_predictions",i,".csv"), row.names = F)
+}
+#################################################################################
+# PCA.svm performed better than any other model I trained so far! The test accuracy was : 0.77990
+# Surprisingly, PCA.lda was the second best one!
+# Take home message: keep trying different models despite their training accuracy, they might perform better in the test set.
+#################################################################################
+
+
+set.seed(1234)
+PCA.svm.linear <- train(Survived ~ ., data = PCAtraining,method = "svmLinear",
+                 trControl= trainControl(method = "boot632"), verbose =F)
+
+set.seed(1234)
+PCA.svm.2 <- train(Survived ~ ., data = PCAtraining,method = "svmRadial",
+                        trControl= trainControl(method = "repeatedcv", number = 50), verbose =F)
+set.seed(1234)
+PCA.svmLinearWeights2 <- train(Survived ~ ., data = PCAtraining,method = "svmLinearWeights2",
+                 trControl= trainControl(method = "boot632"), verbose =F)
+
+set.seed(1234)
+PCA.svmPoly <- train(Survived ~ ., data = PCAtraining,method = "svmPoly",
+                     trControl= trainControl(method = "boot632"), verbose =F)
+
+models <- list(PCA.svm.linear,
+               PCA.svm.2,
+               PCA.svmLinearWeights2,
+               PCA.svmPoly)
+
+predictions2 <- sapply(models, function(x){
+        temp <- as.numeric(as.character(predict(x,newdata = PCAtesting[,-1])))
+})
+
+prediction.table <- NULL
+for(i in seq_along(predictions2)){
+        prediction.table <- data.frame(PassengerId = final_testing$PassengerId, 
+                                       Survived = predictions2[,i])   
+        write.csv(prediction.table,paste0("PCA_predictions2_",i,".csv"), row.names = F)
+}
+
+# None of these modifications performed as good as the PCA.svm.
+
+# So far this is the model that gives the highest accuracy amongst the one I trained:
+set.seed(1234)
+PCA.svm <- train(Survived ~ ., data = PCAtraining,method = "svmRadial",
+                 trControl= trainControl(method = "boot632"), verbose =F)
+
+# Next, I can go back to perform: 
+# - a few more feature engineering steps to add some features I was able to extract previously
+# - repeat PCA 
+# - fit PCA.svm again
+# - Test whether adding a few more features before PCA can improve the accuracy 
