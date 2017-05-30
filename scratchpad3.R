@@ -110,7 +110,7 @@ final_testing <- dplyr::select(final_testing,-Ticket)
 # Title feature from Name:
 
 # Feature engineering function:
-Titles <- function(x){
+Titles.func <- function(x){
         Pass.Names <- x$Name
         
         first.comma<- sapply(gregexpr(",",Pass.Names), function(y){
@@ -122,10 +122,9 @@ Titles <- function(x){
         
         Titles <- substr(Pass.Names,first.comma+2,first.dot-1)  
         return(Titles)
-        
-}
+        }
 
-Titles <- Titles(training)
+Titles <- Titles.func(training)
 
 qplot(x = training$Fare[training$Female == 0], y = factor(Titles[training$Female == 0]), data = training[training$Female == 0,], color = Survived, alpha = I(0.2))+
         theme_bw()
@@ -133,7 +132,7 @@ qplot(x = training$Fare[training$Female == 0], y = factor(Titles[training$Female
 # We notice that "Master" title explains quite a few of the survived males. This would be a useful feature to add into the data sets
 
 training$Titles.Master <- ifelse(Titles == "Master",1,0)
-final_testing$Titles.Master <- ifelse(Titles(final_testing) == "Master",1,0)
+final_testing$Titles.Master <- ifelse(Titles.func(final_testing) == "Master",1,0)
 
 # Remove the original Name feature:
 
@@ -173,4 +172,77 @@ write.csv(prediction.table,paste0("PCA_predictions_3",".csv"), row.names = F)
 # Great work! These two new features alone have increased the testing accuracy from 0.77 to 0.79426!
 # Next, try to perform predictions with other models to see if we can further improve this accuracy with the 
 # existing training set
+
+set.seed(1234)
+PCA.amdai <- train(Survived ~ ., data = PCAtraining,method = "amdai",
+                   trControl= trainControl(method = "boot632"))
+
+
+set.seed(1234)
+PCA.rf <- train(Survived ~ ., data = PCAtraining,method = "rf",
+                trControl= trainControl(method = "boot632"))
+
+
+set.seed(1234)
+PCA.gbm <- train(Survived ~ ., data = PCAtraining,method = "gbm",
+                 trControl= trainControl(method = "boot632", number = 200),verbose =F)
+
+
+set.seed(1234)
+PCA.lda <- train(Survived ~ ., data = PCAtraining,method = "lda",
+                 trControl= trainControl(method = "boot632"), verbose =F)
+
+set.seed(1234)
+PCA.rpart <- train(Survived ~ ., data = PCAtraining,method = "rpart",
+                   trControl= trainControl(method = "boot632"))
+
+
+# Let's make a prediction by using final testing set:
+
+PCAtesting <- predict(prePCA,newdata = final_testing)
+
+predictions <- NULL
+
+models <- list(PCA.lda,
+               PCA.gbm,
+               PCA.rf,
+               PCA.amdai,
+               PCA.rpart,
+               PCA.svm)
+
+predictions <- sapply(models, function(x){
+        temp <- as.numeric(as.character(predict(x,newdata = PCAtesting[,-1])))
+})
+
+prediction.table <- NULL
+for(i in seq_along(predictions)){
+        prediction.table <- data.frame(PassengerId = final_testing$PassengerId, 
+                                       Survived = predictions[,i])   
+        write.csv(prediction.table,paste0("PCA_predictions3_",i,".csv"), row.names = F)
+}
+
+# Note of the other models trained in this new data set improved the accuracy, indeed 
+# for some models, accuracy becomes worse compared to scratchpad2!
+
+# Still remains as the benchmark:
+set.seed(1234)
+PCA.svm <- train(Survived ~ ., data = PCAtraining,method = "svmRadial",
+                 trControl= trainControl(method = "boot632"), verbose =F)
+
+
+set.seed(1234)
+PCA.svm.cv <- train(Survived ~ ., data = PCAtraining,method = "svmRadial",
+                 trControl= trainControl(method = "cv", number = 100), verbose =F)
+
+# Cross validation has some improvement in training accuracy, let's make a prediction:
+
+PCAtesting <- predict(prePCA,newdata = final_testing)
+
+
+prediction.table <- data.frame(PassengerId = final_testing$PassengerId, 
+                               Survived = predict(PCA.svm.cv,PCAtesting))   
+write.csv(prediction.table,paste0("PCA_predictions_3_7",".csv"), row.names = F)
+# Not improved compared to bootstrap632 model.
+
+# PCA.svm still is the bechmark! 0.794 accuracy.
 
