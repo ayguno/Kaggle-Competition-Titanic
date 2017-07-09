@@ -1090,7 +1090,48 @@ Great! These two new features alone have increased the testing accuracy from **0
 
 Take home message: every small twist makes a huge difference!
 
+# Using Shrinkage methods (Regularization)
 
+It would be also interesting to perform a linear model selection and see how well it might perform with the new training set we obtained.
+
+## Fitting a lasso logistic regression model to data
+
+```{r}
+library(glmnet)
+
+# We convert Pclass, SibSp and Parch into factor variables
+
+training$Pclass <- factor(training$Pclass)
+training$SibSp <- factor(training$SibSp)
+training$Parch <- factor(training$Parch)
+
+final_testing$Pclass <- factor(final_testing$Pclass)
+final_testing$SibSp <- factor(final_testing$SibSp)
+final_testing$Parch <- factor(final_testing$Parch)
+
+# We create a matrix of predictors
+x.training = model.matrix(Survived ~ . -1, data = training)
+x.testing = model.matrix( ~ . -1, data = final_testing)
+
+
+y = training$Survived
+
+# Fit lasso regression to training data
+fit.lasso <- glmnet(x.training,y, family = "binomial")
+plot(fit.lasso, xvar = "lambda", label = TRUE)
+plot(fit.lasso, xvar = "dev", label = TRUE)
+
+```
+
+Lasso is a nice way of reducing the features while still trying to explain the variance and therefore trying to win the bias-variance tradeoff. In this case we notice that only 4 features are able to explain 30% of the deviance, while adding all features is only able to explain 40% of it. It is more feasible to use this restricted model with the few features and their shrunken coefficients.
+
+## Choosing the optimal lambda by using cross-validation
+
+It is best to choose the optimal lambda using cross-validation, with the aim of minimizing the missclassification error:
+
+```{r}
+
+```
 
 
 ```
