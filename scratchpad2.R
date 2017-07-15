@@ -92,19 +92,13 @@ set.seed(1234)
 PCAknn <- train(Survived ~ ., data = PCAtraining,method = "knn",
                 trControl= trainControl(method = "boot632"))
 
-# Takes a long time!
-# set.seed(1234)
-# PCA.adaboost <- train(Survived ~ ., data = PCAtraining,method = "adaboost",
-#                    trControl= trainControl(method = "cv"))
+
 
 set.seed(1234)
 PCA.amdai <- train(Survived ~ ., data = PCAtraining,method = "amdai",
                 trControl= trainControl(method = "boot632"))
 
-# # Takes long time!
-# set.seed(1234)
-# PCA.AdaBag <- train(Survived ~ ., data = PCAtraining,method = "AdaBag",
-#                                 trControl= trainControl(method = "boot632"))
+
 
 # So far gives the best accuracy: (bench mark: 0.83)##############
 set.seed(1234)
